@@ -1,340 +1,331 @@
-// Game state variables
-let currentPlayer = 1;
-let playerPositions = { 1: 1, 2: 1 };
-let gameBoard = [];
-let isGameActive = true;
+// Game variables
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const startButton = document.getElementById('startButton');
+const gameOverlay = document.getElementById('gameOverlay');
+const overlayTitle = document.getElementById('overlayTitle');
+const overlayMessage = document.getElementById('overlayMessage');
+const scoreElement = document.getElementById('score');
+const highScoreElement = document.getElementById('highScore');
+const themeToggle = document.getElementById('themeToggle');
+const gameContainer = document.querySelector('.game-container');
 
-// Snakes and Ladders configuration
-// Format: { start: end } - positive for ladders, negative for snakes
-const snakesAndLadders = {
-    16: -6,   // Snake from 16 to 10
-    47: -26,  // Snake from 47 to 21
-    49: -11,  // Snake from 49 to 38
-    56: -19,  // Snake from 56 to 37
-    62: -18,  // Snake from 62 to 44
-    64: -60,  // Snake from 64 to 4
-    87: -24,  // Snake from 87 to 63
-    93: -73,  // Snake from 93 to 20
-    95: -75,  // Snake from 95 to 20
-    98: -78,  // Snake from 98 to 20
-    
-    1: 38,    // Ladder from 1 to 38
-    4: 14,    // Ladder from 4 to 14
-    9: 31,    // Ladder from 9 to 31
-    21: 42,   // Ladder from 21 to 42
-    28: 84,   // Ladder from 28 to 84
-    36: 44,   // Ladder from 36 to 44
-    51: 67,   // Ladder from 51 to 67
-    71: 91,   // Ladder from 71 to 91
-    80: 100   // Ladder from 80 to 100
+// Game state
+let gameRunning = false;
+let gameLoop;
+let score = 0;
+let highScore = localStorage.getItem('carRacingHighScore') || 0;
+let isDarkTheme = localStorage.getItem('carRacingDarkTheme') === 'true';
+
+// Game dimensions
+const CANVAS_WIDTH = 350;
+const CANVAS_HEIGHT = 500;
+const ROAD_WIDTH = 260;
+const ROAD_LEFT = (CANVAS_WIDTH - ROAD_WIDTH) / 2;
+
+// Player car properties
+const playerCar = {
+    x: CANVAS_WIDTH / 2,
+    y: CANVAS_HEIGHT - 100,
+    width: 40,
+    height: 60,
+    speed: 5,
+    color: '#e74c3c'
 };
 
-// DOM elements
-const gameBoardElement = document.getElementById('game-board');
-const diceElement = document.getElementById('dice');
-const rollBtn = document.getElementById('roll-btn');
-const currentPlayerElement = document.getElementById('current-player');
-const player1PosElement = document.getElementById('player1-pos');
-const player2PosElement = document.getElementById('player2-pos');
-const restartBtn = document.getElementById('restart-btn');
-const winnerModal = document.getElementById('winner-modal');
-const winnerText = document.getElementById('winner-text');
-const playAgainBtn = document.getElementById('play-again-btn');
-const themeBtn = document.getElementById('theme-btn');
-const themeIcon = document.getElementById('theme-icon');
+// Obstacle properties
+let obstacles = [];
+const obstacleWidth = 40;
+const obstacleHeight = 60;
+const obstacleSpeed = 3;
+let obstacleSpawnRate = 120; // frames between obstacles
+let frameCount = 0;
 
-// Initialize the game
-function initGame() {
-    loadTheme();
-    generateBoard();
-    updateDisplay();
-    setupEventListeners();
+// Road properties
+let roadOffset = 0;
+const roadLineHeight = 50;
+const roadLineWidth = 10;
+
+// Input handling
+const keys = {
+    ArrowLeft: false,
+    ArrowRight: false
+};
+
+// Initialize high score display
+highScoreElement.textContent = highScore;
+
+// Initialize theme
+initTheme();
+
+// Event listeners
+startButton.addEventListener('click', startGame);
+themeToggle.addEventListener('click', toggleTheme);
+document.addEventListener('keydown', handleKeyDown);
+document.addEventListener('keyup', handleKeyUp);
+
+// Handle key presses
+function handleKeyDown(e) {
+    if (keys.hasOwnProperty(e.code)) {
+        keys[e.code] = true;
+        e.preventDefault();
+    }
 }
 
-// Generate the 10x10 game board
-function generateBoard() {
-    gameBoardElement.innerHTML = '';
+function handleKeyUp(e) {
+    if (keys.hasOwnProperty(e.code)) {
+        keys[e.code] = false;
+        e.preventDefault();
+    }
+}
+
+// Start the game
+function startGame() {
+    gameRunning = true;
+    score = 0;
+    obstacles = [];
+    frameCount = 0;
+    roadOffset = 0;
     
-    // Create 100 cells (10x10 grid)
-    for (let i = 100; i >= 1; i--) {
-        const cell = document.createElement('div');
-        cell.className = 'cell';
-        cell.textContent = i;
-        cell.dataset.position = i;
+    // Reset player position
+    playerCar.x = CANVAS_WIDTH / 2;
+    
+    // Update UI
+    scoreElement.textContent = score;
+    gameOverlay.style.display = 'none';
+    
+    // Start game loop
+    gameLoop = requestAnimationFrame(updateGame);
+}
+
+// End the game
+function endGame() {
+    gameRunning = false;
+    cancelAnimationFrame(gameLoop);
+    
+    // Update high score
+    if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('carRacingHighScore', highScore);
+        highScoreElement.textContent = highScore;
+    }
+    
+    // Show game over screen
+    overlayTitle.textContent = 'Game Over!';
+    overlayMessage.textContent = `Your score: ${score}`;
+    startButton.textContent = 'Play Again';
+    gameOverlay.style.display = 'flex';
+    
+    // Add game over animation
+    canvas.classList.add('game-over');
+    setTimeout(() => {
+        canvas.classList.remove('game-over');
+    }, 500);
+}
+
+// Update game state
+function updateGame() {
+    if (!gameRunning) return;
+    
+    // Update player movement
+    updatePlayer();
+    
+    // Update obstacles
+    updateObstacles();
+    
+    // Update road animation
+    updateRoad();
+    
+    // Check collisions
+    checkCollisions();
+    
+    // Update score
+    updateScore();
+    
+    // Spawn new obstacles
+    frameCount++;
+    if (frameCount % obstacleSpawnRate === 0) {
+        spawnObstacle();
+        // Increase difficulty
+        obstacleSpawnRate = Math.max(60, obstacleSpawnRate - 2);
+    }
+    
+    // Draw everything
+    drawGame();
+    
+    // Continue game loop
+    gameLoop = requestAnimationFrame(updateGame);
+}
+
+// Update player car position
+function updatePlayer() {
+    if (keys.ArrowLeft && playerCar.x > ROAD_LEFT + 10) {
+        playerCar.x -= playerCar.speed;
+    }
+    if (keys.ArrowRight && playerCar.x < ROAD_LEFT + ROAD_WIDTH - playerCar.width - 10) {
+        playerCar.x += playerCar.speed;
+    }
+}
+
+// Update obstacles
+function updateObstacles() {
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].y += obstacleSpeed;
         
-        // Add special styling for snakes and ladders
-        if (snakesAndLadders[i]) {
-            if (snakesAndLadders[i] > 0) {
-                cell.classList.add('ladder');
-                cell.title = `Ladder: ${i} → ${snakesAndLadders[i]}`;
-            } else {
-                cell.classList.add('snake');
-                cell.title = `Snake: ${i} → ${i + snakesAndLadders[i]}`;
-            }
+        // Remove obstacles that are off screen
+        if (obstacles[i].y > CANVAS_HEIGHT) {
+            obstacles.splice(i, 1);
         }
-        
-        gameBoardElement.appendChild(cell);
     }
 }
 
-// Update the display with current game state
-function updateDisplay() {
-    // Update player positions
-    player1PosElement.textContent = `Position: ${playerPositions[1]}`;
-    player2PosElement.textContent = `Position: ${playerPositions[2]}`;
-    
-    // Update current player indicator
-    currentPlayerElement.textContent = `Player ${currentPlayer}'s Turn`;
-    
-    // Update player tokens on board
-    updatePlayerTokens();
-    
-    // Update dice display
-    diceElement.textContent = '?';
-}
-
-// Update turn indicator with countdown status
-function updateTurnIndicator(message) {
-    currentPlayerElement.textContent = message;
-}
-
-// Update player tokens on the board
-function updatePlayerTokens() {
-    // Remove existing tokens
-    const existingTokens = gameBoardElement.querySelectorAll('.player-token');
-    existingTokens.forEach(token => token.remove());
-    
-    // Add player 1 token
-    const player1Cell = gameBoardElement.querySelector(`[data-position="${playerPositions[1]}"]`);
-    if (player1Cell) {
-        const player1Token = document.createElement('div');
-        player1Token.className = 'player-token player1';
-        player1Token.title = 'Player 1';
-        player1Cell.appendChild(player1Token);
-    }
-    
-    // Add player 2 token
-    const player2Cell = gameBoardElement.querySelector(`[data-position="${playerPositions[2]}"]`);
-    if (player2Cell) {
-        const player2Token = document.createElement('div');
-        player2Token.className = 'player-token player2';
-        player2Token.title = 'Player 2';
-        player2Cell.appendChild(player2Token);
+// Update road animation
+function updateRoad() {
+    roadOffset += obstacleSpeed;
+    if (roadOffset >= roadLineHeight) {
+        roadOffset = 0;
     }
 }
 
-// Roll the dice
-function rollDice() {
-    if (!isGameActive) return;
+// Spawn new obstacle
+function spawnObstacle() {
+    const laneWidth = ROAD_WIDTH / 3;
+    const lane = Math.floor(Math.random() * 3);
+    const x = ROAD_LEFT + (lane * laneWidth) + (laneWidth - obstacleWidth) / 2;
     
-    // Disable roll button during animation
-    rollBtn.disabled = true;
-    
-    // Animate dice roll
-    let rollCount = 0;
-    const maxRolls = 10;
-    const rollInterval = setInterval(() => {
-        const randomNumber = Math.floor(Math.random() * 6) + 1;
-        diceElement.textContent = randomNumber;
-        rollCount++;
-        
-        if (rollCount >= maxRolls) {
-            clearInterval(rollInterval);
-            const finalRoll = Math.floor(Math.random() * 6) + 1;
-            diceElement.textContent = finalRoll;
-            
-            // Show countdown timer for 5 seconds
-            let timeLeft = 5;
-            updateTurnIndicator(`Player ${currentPlayer} rolled ${finalRoll} - Moving in ${timeLeft}s...`);
-            diceElement.classList.add('countdown');
-            
-            const countdownInterval = setInterval(() => {
-                timeLeft--;
-                if (timeLeft > 0) {
-                    // Show countdown in dice element
-                    diceElement.textContent = `${finalRoll} (${timeLeft}s)`;
-                    updateTurnIndicator(`Player ${currentPlayer} rolled ${finalRoll} - Moving in ${timeLeft}s...`);
-                } else {
-                    clearInterval(countdownInterval);
-                    diceElement.textContent = finalRoll;
-                    diceElement.classList.remove('countdown');
-                    movePlayer(finalRoll);
-                    rollBtn.disabled = false;
-                }
-            }, 1000);
+    obstacles.push({
+        x: x,
+        y: -obstacleHeight,
+        width: obstacleWidth,
+        height: obstacleHeight,
+        color: '#3498db'
+    });
+}
+
+// Check for collisions
+function checkCollisions() {
+    for (let obstacle of obstacles) {
+        if (isColliding(playerCar, obstacle)) {
+            endGame();
+            return;
         }
-    }, 100);
+    }
 }
 
-// Move the current player
-function movePlayer(diceValue) {
-    const currentPosition = playerPositions[currentPlayer];
-    let newPosition = currentPosition + diceValue;
+// Collision detection
+function isColliding(rect1, rect2) {
+    return rect1.x < rect2.x + rect2.width &&
+           rect1.x + rect1.width > rect2.x &&
+           rect1.y < rect2.y + rect2.height &&
+           rect1.y + rect1.height > rect2.y;
+}
+
+// Update score
+function updateScore() {
+    score++;
+    scoreElement.textContent = score;
     
-    // Check if player won
-    if (newPosition === 100) {
-        playerPositions[currentPlayer] = newPosition;
-        updateDisplay();
-        announceWinner();
-        return;
-    }
-    
-    // If player overshoots 100, they stay in place
-    if (newPosition > 100) {
-        newPosition = currentPosition;
-    }
-    
-    // Update position
-    playerPositions[currentPlayer] = newPosition;
-    
-    // Check for snakes and ladders
-    if (snakesAndLadders[newPosition]) {
-        const oldPosition = newPosition;
-        newPosition += snakesAndLadders[newPosition];
-        
-        // Ensure position doesn't go below 1
-        if (newPosition < 1) {
-            newPosition = 1;
-        }
-        
-        playerPositions[currentPlayer] = newPosition;
-        
-        // Show snake/ladder effect
+    // Add score pulse animation every 100 points
+    if (score % 100 === 0) {
+        scoreElement.classList.add('score-update');
         setTimeout(() => {
-            updateDisplay();
-            const effect = snakesAndLadders[oldPosition] > 0 ? 'Ladder!' : 'Snake!';
-            showMessage(`${effect} Player ${currentPlayer} moved from ${oldPosition} to ${newPosition}`);
+            scoreElement.classList.remove('score-update');
         }, 300);
     }
-    
-    updateDisplay();
-    
-    // Switch turns
-    setTimeout(() => {
-        if (isGameActive) {
-            currentPlayer = currentPlayer === 1 ? 2 : 1;
-            updateDisplay();
-        }
-    }, 1000);
 }
 
-// Show a temporary message
-function showMessage(message) {
-    // Create a temporary message element
-    const messageElement = document.createElement('div');
-    messageElement.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: rgba(0, 0, 0, 0.8);
-        color: white;
-        padding: 15px 25px;
-        border-radius: 10px;
-        font-size: 1.2rem;
-        font-weight: bold;
-        z-index: 1001;
-        animation: fadeInOut 2s ease-in-out;
-    `;
-    messageElement.textContent = message;
+// Draw the game
+function drawGame() {
+    // Clear canvas
+    ctx.fillStyle = '#2c3e50';
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
     
-    // Add CSS animation
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes fadeInOut {
-            0%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
-            50% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-        }
-    `;
-    document.head.appendChild(style);
+    // Draw road
+    drawRoad();
     
-    document.body.appendChild(messageElement);
+    // Draw player car
+    drawCar(playerCar);
     
-    // Remove message after animation
-    setTimeout(() => {
-        document.body.removeChild(messageElement);
-        document.head.removeChild(style);
-    }, 2000);
-}
-
-// Announce the winner
-function announceWinner() {
-    isGameActive = false;
-    winnerText.textContent = `Player ${currentPlayer} Wins! 🎉`;
-    winnerModal.style.display = 'block';
-    
-    // Add winner effect to the winning position
-    const winnerCell = gameBoardElement.querySelector(`[data-position="100"]`);
-    if (winnerCell) {
-        winnerCell.classList.add('winner');
+    // Draw obstacles
+    for (let obstacle of obstacles) {
+        drawCar(obstacle);
     }
 }
 
-// Restart the game
-function restartGame() {
-    currentPlayer = 1;
-    playerPositions = { 1: 1, 2: 1 };
-    isGameActive = true;
+// Draw the road
+function drawRoad() {
+    // Road background
+    ctx.fillStyle = '#34495e';
+    ctx.fillRect(ROAD_LEFT, 0, ROAD_WIDTH, CANVAS_HEIGHT);
     
-    // Remove winner effect
-    const winnerCell = gameBoardElement.querySelector('.winner');
-    if (winnerCell) {
-        winnerCell.classList.remove('winner');
+    // Road lines
+    ctx.fillStyle = '#f39c12';
+    ctx.strokeStyle = '#f39c12';
+    ctx.lineWidth = roadLineWidth;
+    
+    // Center line
+    const centerX = CANVAS_WIDTH / 2;
+    for (let y = roadOffset; y < CANVAS_HEIGHT; y += roadLineHeight * 2) {
+        ctx.fillRect(centerX - roadLineWidth/2, y, roadLineWidth, roadLineHeight);
     }
     
-    // Hide modal
-    winnerModal.style.display = 'none';
+    // Side lines
+    ctx.fillRect(ROAD_LEFT, 0, roadLineWidth, CANVAS_HEIGHT);
+    ctx.fillRect(ROAD_LEFT + ROAD_WIDTH - roadLineWidth, 0, roadLineWidth, CANVAS_HEIGHT);
+}
+
+// Draw a car
+function drawCar(car) {
+    // Car body
+    ctx.fillStyle = car.color;
+    ctx.fillRect(car.x, car.y, car.width, car.height);
     
-    // Update display
-    updateDisplay();
+    // Car details
+    ctx.fillStyle = '#2c3e50';
+    
+    // Windows
+    ctx.fillRect(car.x + 5, car.y + 5, car.width - 10, 15);
+    ctx.fillRect(car.x + 5, car.y + car.height - 20, car.width - 10, 15);
+    
+    // Headlights
+    ctx.fillStyle = '#f1c40f';
+    ctx.fillRect(car.x + 5, car.y + 2, 8, 6);
+    ctx.fillRect(car.x + car.width - 13, car.y + 2, 8, 6);
+    
+    // Taillights
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillRect(car.x + 5, car.y + car.height - 8, 8, 6);
+    ctx.fillRect(car.x + car.width - 13, car.y + car.height - 8, 8, 6);
+    
+    // Wheels
+    ctx.fillStyle = '#2c3e50';
+    ctx.fillRect(car.x - 3, car.y + 10, 6, 15);
+    ctx.fillRect(car.x + car.width - 3, car.y + 10, 6, 15);
+    ctx.fillRect(car.x - 3, car.y + car.height - 25, 6, 15);
+    ctx.fillRect(car.x + car.width - 3, car.y + car.height - 25, 6, 15);
 }
 
-// Theme management functions
-function loadTheme() {
-    const savedTheme = localStorage.getItem('snakes-ladders-theme') || 'light';
-    setTheme(savedTheme);
-}
-
-function setTheme(theme) {
-    document.documentElement.setAttribute('data-theme', theme);
-    themeIcon.textContent = theme === 'dark' ? '☀️' : '🌙';
-    localStorage.setItem('snakes-ladders-theme', theme);
+// Theme functions
+function initTheme() {
+    if (isDarkTheme) {
+        gameContainer.classList.add('dark-theme');
+        themeToggle.querySelector('.theme-icon').textContent = '☀️';
+    } else {
+        gameContainer.classList.remove('dark-theme');
+        themeToggle.querySelector('.theme-icon').textContent = '🌙';
+    }
 }
 
 function toggleTheme() {
-    const currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
-    const newTheme = currentTheme === 'light' ? 'dark' : 'light';
-    setTheme(newTheme);
+    isDarkTheme = !isDarkTheme;
+    localStorage.setItem('carRacingDarkTheme', isDarkTheme);
+    initTheme();
 }
 
-// Setup event listeners
-function setupEventListeners() {
-    rollBtn.addEventListener('click', rollDice);
-    restartBtn.addEventListener('click', restartGame);
-    playAgainBtn.addEventListener('click', restartGame);
-    themeBtn.addEventListener('click', toggleTheme);
-    
-    // Close modal when clicking outside
-    winnerModal.addEventListener('click', (e) => {
-        if (e.target === winnerModal) {
-            winnerModal.style.display = 'none';
-        }
-    });
-    
-    // Keyboard shortcuts
-    document.addEventListener('keydown', (e) => {
-        if (e.code === 'Space' && isGameActive && !rollBtn.disabled) {
-            e.preventDefault();
-            rollDice();
-        }
-        if (e.code === 'KeyR') {
-            restartGame();
-        }
-        if (e.code === 'KeyT') {
-            toggleTheme();
-        }
-    });
+// Initialize the game
+function init() {
+    drawGame();
 }
 
-// Start the game when the page loads
-document.addEventListener('DOMContentLoaded', initGame);
+// Start the game when page loads
+window.addEventListener('load', init);
